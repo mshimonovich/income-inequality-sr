@@ -1,19 +1,8 @@
-install.packages("pacman")
 pacman::p_load(ggplot2, tidyverse, dplyr, dosresmeta, readxl, SciViews, naniar, meta, mvmeta, metafor, ggplot2, grid, rlang, data.table, stringi, gt, glue, shape, berryFunctions)
-
-setwd("C:/Users/mshim/OneDrive/Documents/r_projects/incominequal_sr")
-
-
-
-dflist<-list(srh= data.frame(srh), acm=data.frame(acm))
-
 ##1. Create list for all-cause mortality (acm) and self-rated health (srh) dataframes and transform estimates to logform 
-
 dflist<-list()
-
-dflist$srh <- read_excel("prep_srh.xlsx", na = "NA")
-dflist$acm <- read_excel("prep_acm.xlsx", na = "NA")
-
+dflist$srh <- read_excel("cleaning/prep_srh.xlsx", na = "NA")
+dflist$acm <- read_excel("cleaning/prep_acm.xlsx", na = "NA")
 dflist$acm<-dflist$acm %>% mutate(rat_re=ifelse(out_est=="logit" & is.na(rat_re), exp(b_re), rat_re),
                     se_re=ifelse(is.na(se_re) & out_est=="HR", b_re/tscore_re, abs(se_re)),            
                lcl_re=ifelse(out_est=="logit" & is.na(lcl_re), exp(b_re-(qnorm(1-0.05/2)*se_re)), lcl_re),
@@ -127,13 +116,13 @@ meta_list<-map(dflist4, function (x) {
 
 
 ############create databases now
-info_srh <- data.frame(read_excel("studyinfo_srh.xlsx", na = "NA"))
-info_acm <- data.frame(read_excel("studyinfo_acm.xlsx", na = "NA"))
+info_srh <- data.frame(read_excel("cleaning/studyinfo_srh.xlsx", na = "NA"))
+info_acm <- data.frame(read_excel("cleaning/studyinfo_acm.xlsx", na = "NA"))
 info_list <- list(srh=info_srh, acm=info_acm)
 
 
-ref_srh <- data.frame(read_excel("endnote_srh.xlsx"))
-ref_acm <- data.frame(read_excel("endnote_acm.xlsx"))
+ref_srh <- data.frame(read_excel("cleaning/endnote_srh.xlsx"))
+ref_acm <- data.frame(read_excel("cleaning/endnote_acm.xlsx"))
 ref_list <- list(srh=data.frame(ref_srh), acm=data.frame(ref_acm))
 
 ##clean ref files
@@ -150,14 +139,14 @@ ref_list<-map(ref_list, function (x) {
   ) %>% select(-c(reference:pub_year_dup))
 })
 
-compl<-  function(x, y, z) {
+complete<-  function(x, y, z) {
   x %>% left_join(y, by = c('covidence_id'='covidence_id')) %>%  left_join(z, by=c('covidence_id'='covidence_id'))}
-all<-purrr::pmap(list(meta_list, ref_list, info_list),  ~compl(x = ..1, y = ..2, z= ..3))
+complete<-purrr::pmap(list(meta_list, ref_list, info_list),  ~complete(x = ..1, y = ..2, z= ..3))
 
 
-all<-map(all, function(x) x %>% relocate(rob, .after = main)%>% relocate(auth_dup, .after = gscale_desc)) 
-all <- map(all, ~.x %>% mutate(rown = row_number()))
-all$acm <- all$acm %>% mutate(fu_med=ifelse(is.na(fu_med), map2_dbl(fu_min, fu_max, ~mean(c(.x, .y))), fu_med),
+complete<-map(complete, function(x) x %>% relocate(rob, .after = main)%>% relocate(auth_dup, .after = gscale_desc)) 
+complete <- map(complete, ~.x %>% mutate(rown = row_number()))
+complete$acm <- complete$acm %>% mutate(fu_med=ifelse(is.na(fu_med), map2_dbl(fu_min, fu_max, ~mean(c(.x, .y))), fu_med),
                               fu_cat = case_when(
                                 fu_med<5.00~ "0",
                                 fu_med>=5.00 & fu_med<=10.00 ~ "1",
@@ -166,22 +155,13 @@ all$acm <- all$acm %>% mutate(fu_med=ifelse(is.na(fu_med), map2_dbl(fu_min, fu_m
                               fu_n = ifelse(!is.na(fu_mn), fu_mn, fu_med)
 ) %>% relocate(c(fu_n, fu_cat), .after=timelag_n)
 
-all$srh <- all$srh %>% mutate(fu_cat=sample(0:2, n(), replace = TRUE)) %>% relocate(fu_cat, .before=timelag_cat)
-all$srh[all$srh$covidence_id=="#11971", "adjust_ind"] <- "age, gender, income, marital status, race, health care coverage, health check up in last year, smoking habit"
-all$srh[all$srh$covidence_id=="#11971", "adjust_area"] <- "per capita median income, % mistrust in area"
+complete$srh <- complete$srh %>% mutate(fu_cat=sample(0:2, n(), replace = TRUE)) %>% relocate(fu_cat, .before=timelag_cat)
+complete$srh[complete$srh$covidence_id=="#11971", "adjust_ind"] <- "age, gender, income, marital status, race, health care coverage, health check up in last year, smoking habit"
+complete$srh[complete$srh$covidence_id=="#11971", "adjust_area"] <- "per capita median income, % mistrust in area"
 
-file_out <- paste0("all_", names(all), ".csv")
-map2(all,
-     file_out,
-     function(model, name) {
-       write_csv(x=model, file=name)
-     }
-)
-all <- list()
-all$srh <- read.csv("all_srh.csv", na = "NA")
-all$acm <- read.csv("all_acm.csv", na = "NA")
-all$srh <- all$srh %>% mutate(rown = row_number())
-all<-map(all, function (x) {
+
+complete$srh <- complete$srh %>% mutate(rown = row_number())
+complete<-map(complete, function (x) {
   x %>% mutate(dplyr::across(ends_with("_cat"), forcats::as_factor)) %>% 
     mutate( timelag_cat = dplyr:::recode_factor(timelag_cat, "0"= "< 6 years", "1"= "> 6 years"),
             usa_cat = dplyr:::recode_factor(usa_cat, "0"="Not-USA", "1"="USA"),
@@ -197,17 +177,23 @@ all<-map(all, function (x) {
   }
 )
 
-analysis<-map(all, function(x){
+complete$srh[complete$srh$covidence_id=="#11971", "adjust_ind"] <- "age, gender, income, marital status, race, health care coverage, health check up in last year, smoking habit"
+complete$srh[complete$srh$covidence_id=="#11971", "adjust_area"] <- "per capita median income, % mistrust in area"
+complete$srh[complete$srh$covidence_id=="#9933", "study_desc"] <- "National Longitudinal Survey of Youth (NLSY)"
+complete$srh[complete$srh$covidence_id=="#2117", "study_desc"] <- "Cancer Prevention Study-II (CPS-II)"
+
+character <-map(complete, function(x) 
+  x %>% filter(main==1) %>% select(-c(auth_dup))
+)
+
+complete_main<-map(complete, function(x){
   x %>% filter(main==1) %>% select(-c(women_prop:ncol(.)))
 }
 )
 
-character <-map(all, function(x) 
-  x %>% filter(main==1) %>% select(-c(auth_dup))
-)
-saveRDS(object=all, file = "all.rds")
-saveRDS(object=analysis, file = "analysis.rds")
-saveRDS(object=character, file = "stchar.rds")
+saveRDS(object=complete, file = "cleaning/complete.rds")
+saveRDS(object=complete_main, file = "cleaning/complete_main.rds")
+saveRDS(object=character, file = "outputs/stchar.rds")
 
 ####now all missing SEs are filled, can move onto meta analysis file
 ##pre-analysis cleaning done
